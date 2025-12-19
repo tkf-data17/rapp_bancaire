@@ -1,0 +1,87 @@
+import fitz # PyMuPDF
+import subprocess
+import pytesseract
+from PIL import Image
+import io
+import os
+import shutil 
+
+# 🚨 CHEMINS TESSERACT : UTILISEZ CEUX QUE VOUS AVEZ VÉRIFIÉS 🚨
+TESSERACT_PATH = r"C:\Users\HP ELITE BOOK\AppData\Local\Programs\Tesseract-OCR\tesseract.exe" 
+TESSDATA_DIR = r"C:\Users\HP ELITE BOOK\AppData\Local\Programs\Tesseract-OCR\tessdata"
+
+# Configuration de l'environnement Python pour Tesseract
+pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
+# Définit la variable d'environnement TESSDATA_PREFIX (plus fiable)
+os.environ['TESSDATA_PREFIX'] = TESSDATA_DIR 
+
+def generate_ocr_split(input_pdf_path, output_split_dir="ocr_split_pages"):
+    """
+    Traite le PDF page par page, effectue l'OCR et sauvegarde chaque page 
+    individuellement dans un dossier.
+    """
+    
+    TESSERACT_LANG = "fra" 
+    
+    try:
+        # Créer le dossier de sortie pour les pages splitées si nécessaire
+        if not os.path.exists(output_split_dir):
+            os.makedirs(output_split_dir)
+            print(f"Création du dossier de sortie : '{output_split_dir}'")
+            
+        doc = fitz.open(input_pdf_path)
+        print(f"Démarrage de l'OCR sur {doc.page_count} pages...")
+        
+        # Nous n'avons plus besoin de temp_ocr_files car il n'y a pas de fusion
+        
+        for i in range(doc.page_count):
+            page = doc.load_page(i)
+            
+            # 1. Conversion de la page en image PNG (haute résolution)
+            pix = page.get_pixmap(dpi=300) 
+            temp_image_file = f"temp_ocr_page_{i+1}.png"
+            pix.save(temp_image_file)
+            
+            # 2. Définition des chemins de sortie
+            temp_pdf_file = f"temp_ocr_page_{i+1}.pdf"
+            split_output_file = os.path.join(output_split_dir, f"ocr_page_{i+1}.pdf")
+            
+            # 3. Exécution de Tesseract (génère temp_pdf_file)
+            command = [
+                TESSERACT_PATH,
+                temp_image_file, 
+                temp_pdf_file[:-4], # Fichier de sortie temporaire (nom sans extension .pdf)
+                '-l', TESSERACT_LANG,
+                'pdf' 
+            ]
+            
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            
+            # 4. Déplacement du fichier OCR final vers le dossier de split
+            shutil.move(temp_pdf_file, split_output_file)
+            
+            # 5. Nettoyage
+            os.remove(temp_image_file)
+            
+            print(f"Page {i+1} : OCR terminé et enregistré dans '{split_output_file}'")
+
+        doc.close()
+        
+        print("\n✅ Succès : Toutes les pages OCR ont été enregistrées individuellement.")
+        return output_split_dir
+
+    except subprocess.CalledProcessError as e:
+        print(f"\nERREUR TESSERACT: Tesseract a échoué avec le code {e.returncode}. Sortie : {e.stderr}")
+        return None
+    except Exception as e:
+        print(f"\nERREUR: Une erreur est survenue pendant l'OCR: {e}")
+        return None
+    
+# ----------------- EXÉCUTION DU SCRIPT -----------------
+if __name__ == "__main__":
+    input_pdf = "relevé_oct_nov.pdf" 
+    # Appel de la nouvelle fonction qui ne fait pas de fusion
+    result_dir = generate_ocr_split(input_pdf)
+    
+    if result_dir:
+        print(f"\nLe dossier contenant les pages OCR est : {result_dir}")
