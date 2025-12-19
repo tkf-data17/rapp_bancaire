@@ -1,0 +1,6 @@
+.env
+extraction_files/
+ocr_split_pages/
+__pycache__/
+*.pyc
+.venv/
