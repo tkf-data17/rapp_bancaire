@@ -91,7 +91,7 @@ def generate_ocr_split(input_pdf_path, output_split_dir=config.input_dir):
     
 # ----------------- EXÉCUTION DU SCRIPT -----------------
 if __name__ == "__main__":
-    input_pdf = "relevé_oct_nov.pdf" 
+    input_pdf = config.input_pdf
     # Appel de la nouvelle fonction qui ne fait pas de fusion
     result_dir = generate_ocr_split(input_pdf)
     
