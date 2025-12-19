@@ -5,6 +5,7 @@ from PIL import Image
 import io
 import os
 import shutil 
+import config 
 
 # 🚨 CHEMINS TESSERACT : UTILISEZ CEUX QUE VOUS AVEZ VÉRIFIÉS 🚨
 TESSERACT_PATH = r"C:\Users\HP ELITE BOOK\AppData\Local\Programs\Tesseract-OCR\tesseract.exe" 
@@ -15,7 +16,7 @@ pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
 # Définit la variable d'environnement TESSDATA_PREFIX (plus fiable)
 os.environ['TESSDATA_PREFIX'] = TESSDATA_DIR 
 
-def generate_ocr_split(input_pdf_path, output_split_dir="ocr_split_pages"):
+def generate_ocr_split(input_pdf_path, output_split_dir=config.input_dir):
     """
     Traite le PDF page par page, effectue l'OCR et sauvegarde chaque page 
     individuellement dans un dossier.
@@ -24,8 +25,19 @@ def generate_ocr_split(input_pdf_path, output_split_dir="ocr_split_pages"):
     TESSERACT_LANG = "fra" 
     
     try:
-        # Créer le dossier de sortie pour les pages splitées si nécessaire
-        if not os.path.exists(output_split_dir):
+        # Nettoyage et création du dossier de sortie
+        if os.path.exists(output_split_dir):
+            print(f"Nettoyage du dossier existant : '{output_split_dir}'")
+            for filename in os.listdir(output_split_dir):
+                file_path = os.path.join(output_split_dir, filename)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                except Exception as e:
+                    print(f"Erreur lors de la suppression de {file_path}: {e}")
+        else:
             os.makedirs(output_split_dir)
             print(f"Création du dossier de sortie : '{output_split_dir}'")
             
@@ -63,11 +75,11 @@ def generate_ocr_split(input_pdf_path, output_split_dir="ocr_split_pages"):
             # 5. Nettoyage
             os.remove(temp_image_file)
             
-            print(f"Page {i+1} : OCR terminé et enregistré dans '{split_output_file}'")
+            # print(f"Page {i+1} : OCR terminé et enregistré dans '{split_output_file}'")
 
         doc.close()
         
-        print("\n✅ Succès : Toutes les pages OCR ont été enregistrées individuellement.")
+        # print("\n✅ Succès : Toutes les pages OCR ont été enregistrées individuellement.")
         return output_split_dir
 
     except subprocess.CalledProcessError as e:

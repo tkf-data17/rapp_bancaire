@@ -7,6 +7,8 @@ import pandas as pd
 import re
 import os
 import sys
+import shutil
+import config
 from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 
@@ -79,33 +81,57 @@ def extract_transactions_from_pdf(pdf_path: str) -> pd.DataFrame:
             # Si "Total général" est détecté, on coupe la ligne à cet endroit
             # pour ne garder que la transaction qui précède.
             trunc_index = -1
+            matches_total_footer = False
+            
             for i, w in enumerate(line_words):
                 # Check simple "Total" (insensible à la casse)
                 if "total" in w[4].lower():
                     # Vérifier le contexte
                     snippet = "".join([wx[4] for wx in line_words[i:i+8]]).replace(" ", "").lower()
                     
-                    with open("debug_total.log", "a", encoding="utf-8") as f:
-                        f.write(f"Word: {w[4]}, Snippet: {snippet}\n")
+                    # with open("debug_total.log", "a", encoding="utf-8") as f:
+                    #     f.write(f"Word: {w[4]}, Snippet: {snippet}\n")
 
-                    if "totalgénéral" in snippet or "totaldesmouvements" in snippet or "totaldeb" in snippet:
-                         with open("debug_total.log", "a", encoding="utf-8") as f:
-                             f.write("  -> TRUNCATED\n")
+                    # Normalisation stricte pour détection
+                    clean_snippet = snippet.replace("é", "e").replace("è", "e")
+                    
+                    if ("totalgeneral" in clean_snippet or 
+                        "totalmouvements" in clean_snippet or 
+                        "totaldesmouvements" in clean_snippet or 
+                        "totaldeb" in clean_snippet or
+                        "totalcred" in clean_snippet):
+                         # with open("debug_total.log", "a", encoding="utf-8") as f:
+                         #     f.write("  -> TRUNCATED (snippet match)\n")
                          trunc_index = i
+                         matches_total_footer = True
                          break
                     
+                    # Check direct variations in the word itself or next word
                     if "totalgénéral" in w[4].replace(" ", "").lower():
-                         with open("debug_total.log", "a", encoding="utf-8") as f:
-                             f.write("  -> TRUNCATED (single word)\n")
+                         # with open("debug_total.log", "a", encoding="utf-8") as f:
+                         #     f.write("  -> TRUNCATED (single word)\n")
                          trunc_index = i
+                         matches_total_footer = True
                          break
             
             if trunc_index != -1:
                 line_words = line_words[:trunc_index]
-                with open("debug_total.log", "a", encoding="utf-8") as f:
-                    remaining = [wx[4] for wx in line_words]
-                    f.write(f"  -> REMAINING: {remaining}\n")
-                if not line_words: continue # Si la ligne ne contenait que le total, on passe
+                # with open("debug_total.log", "a", encoding="utf-8") as f:
+                #     remaining = [wx[4] for wx in line_words]
+                #     f.write(f"  -> REMAINING: {remaining}\n")
+                
+                # Si c'était un footer "Total", on doit clôre la transaction courante
+                # car les lignes suivantes risquent d'être les montants de ce total
+                if matches_total_footer:
+                    # Cas 1: La ligne ne contenait QUE le total (donc line_words est vide maintenant)
+                    # On ferme tout de suite.
+                    if not line_words:
+                        if current_tx:
+                            transactions.append(current_tx)
+                            current_tx = {}
+                        continue # On passe la ligne
+                
+                if not line_words: continue # Si la ligne ne contenait que le total (cas non total_general aussi), on passe
             
             # Filter Header/Footer based on content
             full_line_text = " ".join([w[4] for w in line_words])
@@ -115,7 +141,8 @@ def extract_transactions_from_pdf(pdf_path: str) -> pd.DataFrame:
                 "Date", "Libellé", "Valeur", "Débit", "Crédit", "Solde", # En-tête tableau
                 "Solde précédent", # Ligne de solde initial
                 "Page", "Edité le", "www.orabank.net", "ORABANK", "Capital de", "RCCM", # Pied de page
-                "Veuillez noter que vous disposez", "Place de l'indépendance", "Tél. :" # Mentions légales
+                "Veuillez noter que vous disposez", "Place de l'indépendance", "Tél. :", # Mentions légales
+                "Total général", "Total des mouvements" # Totaux
             ]
             
             should_skip = False
@@ -187,6 +214,12 @@ def extract_transactions_from_pdf(pdf_path: str) -> pd.DataFrame:
                     current_tx["Crédit"] += text
                 else: # Solde
                     current_tx["Solde"] += text
+            
+            # Si c'était la ligne de total (cas mixte), on ferme la transaction maintenant
+            if matches_total_footer:
+                if current_tx:
+                    transactions.append(current_tx)
+                    current_tx = {}
 
     # Add last
     if current_tx:
@@ -333,47 +366,91 @@ def analyze_and_export(df: pd.DataFrame, output_prefix: str = "transactions", so
             df_export[col] = pd.to_datetime(df_export[col]).dt.strftime('%d/%m/%Y')
             
     # Création du dossier de sortie s'il n'existe pas
-    output_dir = "extraction_files"
+    # Création du dossier de sortie s'il n'existe pas
+    output_dir = config.output_dir
     os.makedirs(output_dir, exist_ok=True)
 
     csv_file = os.path.join(output_dir, f"{output_prefix}.csv")
     df_export.to_csv(csv_file, index=False, encoding='utf-8-sig', sep=';') # Point-virgule pour Excel FR
     print(f"\n✅ Exporté vers: {csv_file}")
     
-    try:
-        excel_file = os.path.join(output_dir, f"{output_prefix}.xlsx")
-        df_export.to_excel(excel_file, index=False)
-        print(f"✅ Exporté vers: {excel_file}")
-    except ImportError:
-        print("\n💡 Pour exporter vers Excel, installez openpyxl: pip install openpyxl")
+    # try:
+    #     excel_file = os.path.join(output_dir, f"{output_prefix}.xlsx")
+    #     try:
+    #         df_export.to_excel(excel_file, index=False)
+    #         print(f"✅ Exporté vers: {excel_file}")
+    #     except PermissionError:
+    #         print(f"⚠️ Impossible d'écrire dans {excel_file}. Le fichier est-il ouvert dans Excel ?")
+            
+    # except ImportError:
+    #     print("\n💡 Pour exporter vers Excel, installez openpyxl: pip install openpyxl")
+
+
+
+def batch_process_pdf_folder(source_dir=config.input_dir):
+    """
+    Parcourt tous les fichiers PDF du dossier source et lance l'extraction pour chacun.
+    """
+    if not os.path.exists(source_dir):
+        print(f"❌ Le dossier {source_dir} n'existe pas.")
+        return
+
+    # Nettoyage du dossier de sortie "extraction_files"
+    output_dir = config.output_dir
+    if os.path.exists(output_dir):
+        print(f"🧹 Nettoyage du dossier de sortie : '{output_dir}'")
+        for filename in os.listdir(output_dir):
+            file_path = os.path.join(output_dir, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print(f"⚠️ Impossible de supprimer {file_path}: {e}")
+    else:
+        os.makedirs(output_dir)
+        print(f"📁 Création du dossier de sortie : '{output_dir}'")
+
+    # Lister les PDF
+    files = [f for f in os.listdir(source_dir) if f.strip().lower().endswith(".pdf")]
+    
+    # Tri naturel pour traiter page_1, page_2... dans l'ordre
+    files.sort(key=lambda x: int(re.search(r'\d+', x).group()) if re.search(r'\d+', x) else 0)
+    
+    print(f"\n🚀 Démarrage du traitement par lot dans: {source_dir}")
+    print(f"📂 {len(files)} fichiers trouvés.\n")
+    
+    for filename in files:
+        pdf_path = os.path.join(source_dir, filename)
+        print(f"👉 Traitement de {filename}...")
+        
+        try:
+            # 1. Solde
+            solde_prec = get_solde_precedent(pdf_path)
+            
+            # 2. Extraction
+            df = extract_transactions_from_pdf(pdf_path)
+            
+            # 3. Export
+            if not df.empty:
+                print(f"   ✅ {len(df)} transactions.")
+                df_clean = clean_and_format_dataframe(df)
+                
+                # Nom du fichier de sortie basé sur le PDF
+                output_name = os.path.splitext(filename)[0]
+                analyze_and_export(df_clean, output_name, solde_prec)
+            else:
+                print("   ⚠️ Aucune transaction trouvée sur cette page.")
+                
+        except Exception as e:
+            print(f"   ❌ Erreur: {e}")
+        
+        print("-" * 50)
 
 if __name__ == "__main__":
     load_dotenv()
-    PDF_PATH = r"ocr_split_pages/ocr_page_7.pdf"
+    
+    # Lancement du traitement sur tout le dossier
+    batch_process_pdf_folder(config.input_dir)
 
-    if not os.path.exists(PDF_PATH):
-        print(f"❌ Fichier PDF non trouvé: {PDF_PATH}"); exit(1)
-
-    print("\n🚀 Lancement de l'extraction (méthode Layout/Coordonnées)...")
-    try:
-        # 1. Solde
-        solde_prec = get_solde_precedent(PDF_PATH)
-        
-        # 2. Extract Table
-        df = extract_transactions_from_pdf(PDF_PATH)
-        
-        # 3. Process
-        if not df.empty:
-            print(f"✅ {len(df)} transactions brutes trouvées.")
-            df_clean = clean_and_format_dataframe(df)
-            
-            # Utiliser le nom du fichier PDF comme préfixe de sortie
-            pdf_name = os.path.splitext(os.path.basename(PDF_PATH))[0]
-            analyze_and_export(df_clean, pdf_name, solde_prec)
-        else:
-            print("❌ Aucune transaction trouvée.")
-            
-    except Exception as e:
-        print(f"❌ Erreur: {e}")
-        import traceback
-        traceback.print_exc()
